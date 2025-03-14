@@ -1,0 +1,155 @@
+pipeline {
+    agent {
+        docker {
+            image 'python:3.10'
+        }
+    }
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('docker-hub-creds') // put the credentials in the jenkins
+        DOCKER_REGISTRY = 'morandan7'
+        REPO_NAME = 'jenkins'  // Change to 'be-exam' for backend pipeline
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        
+    }
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: 'jenkins', url: 'https://github.com/MoriD12/final.git' //'https://github.com/MoranDanino/devopshift-welcome.git'
+            }
+        }
+
+        stage('Lint & Security Scan'){
+            parallel{
+                stage('Flake8 Linting') { //linting
+                    steps {
+                        sh 'pip install flake8'
+                        sh 'flake8 . || true'
+                    }
+                }
+                
+                stage('Bandit Security Scan') { //security check
+                    steps {
+                        sh 'pip install bandit'
+                        sh 'bandit -r . || true'  
+                    }
+                }
+
+                // stage('ShellCheck Linting') {
+                //     steps {
+                //         sh '''
+                //             apt-get update
+                //             apt-get install -y shellcheck
+                //             shellcheck scripts/*.sh || true
+                //         '''
+                //     }
+                // }
+
+                // stage('Hadolint Dockerfile Linting') {
+                //         steps {
+                //             dir('exam-code/docker/fe') { ///////////
+                //                 sh '''
+                //                     docker run --rm -i hadolint/hadolint < Dockerfile || true
+                //                 '''
+                //             }
+                //         }
+                //     }
+
+                // stage('Trivy Security Scan') { //security checks
+                //     steps {
+                //         dir('exam-code/docker/fe') {
+                //             sh '''
+                //                 apt-get update
+                //                 apt-get install -y wget
+                //                 wget https://github.com/aquasecurity/trivy/releases/download/v0.47.0/trivy_0.47.0_Linux-64bit.deb
+                //                 dpkg -i trivy_0.47.0_Linux-64bit.deb
+                //                 trivy image --exit-code 0 ${DOCKER_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
+                //             '''
+                //         }
+                //     }
+                //     when {
+                //         expression { return currentBuild.currentResult == 'SUCCESS' }
+                //     }
+                // }
+
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'ls -l'
+                sh 'cd jenkins && pip install -r requirements.txt' 
+            }
+        }
+
+        //add stage to handle errors: Docker not found && download docker-compose
+        stage('Install Docker'){
+            steps{
+                sh '''
+                #install docker
+                apt-get update
+                apt-get install -y docker.io 
+                docker --version
+
+                #install docker-compose
+                curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+                chmod +x /usr/local/bin/docker-compose
+                /usr/local/bin/docker-compose --version
+                '''
+            }
+        }
+
+        stage('Build Docker Image'){
+            steps {
+                dir('exam-code/docker/fe') {  ///////////////////
+                    script {
+                        sh 'docker build -t ${DOCKER_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .'
+                        sh 'docker tag ${DOCKER_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${DOCKER_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}'
+                    }
+                }
+            }
+        }
+
+        stage('Run Tests in Container'){
+            steps{
+                sh 'docker run --rm ${DOCKER_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} pytest tests/'
+            }
+        }
+
+        // stage('Integration Test with Docker Compose'){
+        //     steps {
+        //         sh '''
+        //             cd exam-code/docker
+        //             ls -la
+        //             docker-compose up -d
+        //             sleep 20
+        //             curl -f http://localhost:5002 || echo "curl not working"
+        //             docker-compose down 
+        //         '''
+        //     }
+        // }
+
+        stage('Push to Docker Hub'){
+            steps{
+                sh '''
+                echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin
+                docker push ${DOCKER_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} 
+                docker push ${DOCKER_REGISTRY}/${REPO_NAME}:latest
+                '''
+            } 
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up workspace'
+            deleteDir()
+        }
+        failure {
+            echo 'Failed'
+        }
+        success {
+            echo 'Success'
+        }
+    }
+
+}
