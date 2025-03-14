@@ -22,11 +22,6 @@ variable "vpc_cidr" {
     default = "10.0.0.0/16"
 }
 
-# variable "ingress_rules" {
-#     type = list(number)
-#     default = [22,5001]
-# }
-
 variable "ssh_key" {
     default = "moran_ssh_key"
 }

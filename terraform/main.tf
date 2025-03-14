@@ -17,7 +17,7 @@ resource "aws_internet_gateway" "moran_internet_gateway" {
     vpc_id = aws_vpc.moran_vpc.id
 
     tags = {
-      Name = "${var.name}-IG"
+      Name = "${var.name}-ig"
     }
 }
 
@@ -83,26 +83,26 @@ resource "aws_instance" "builder" {
   subnet_id = aws_subnet.moran_subnet.id
   vpc_security_group_ids = [aws_security_group.moran_sg.id]
 
-  user_data = base64encode(<<-EOF
-              #!/bin/bash
-              # Add Docker's official GPG key:
-              sudo apt-get update
-              sudo apt-get install ca-certificates curl
-              sudo install -m 0755 -d /etc/apt/keyrings
-              sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-              sudo chmod a+r /etc/apt/keyrings/docker.asc
-              echo \
-              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-              $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-              sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-              sudo apt-get update
-              sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  # user_data = base64encode(<<-EOF
+  #             #!/bin/bash
+  #             # Add Docker's official GPG key:
+  #             sudo apt-get update
+  #             sudo apt-get install ca-certificates curl
+  #             sudo install -m 0755 -d /etc/apt/keyrings
+  #             sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  #             sudo chmod a+r /etc/apt/keyrings/docker.asc
+  #             echo \
+  #             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  #             $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  #             sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  #             sudo apt-get update
+  #             sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
               
-              # Install Docker Compose
-              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-              sudo chmod +x /usr/local/bin/docker-compose
-              EOF
-  )
+  #             # Install Docker Compose
+  #             sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  #             sudo chmod +x /usr/local/bin/docker-compose
+  #             EOF
+  # )
 
   tags = {
     Name = "builder"
@@ -110,5 +110,45 @@ resource "aws_instance" "builder" {
 }
 
 
+# A null_resource to handle Docker installation
+resource "null_resource" "install_docker" {
+  depends_on = [aws_instance.builder]
+
+  triggers = {
+    instance_id = aws_instance.builder.id
+  }
+
+  # use installation script
+  provisioner "file" {
+    source      = "${path.module}/script.sh"
+    destination = "/tmp/script.sh"
+
+    connection {
+      type        = "ssh"
+      user        = "ubuntu"
+      private_key = file("~/.ssh/${var.ssh_key}")
+      host        = aws_instance.builder.public_ip
+      timeout     = "5m"
+      agent       = false
+    }
+  }
+
+  # Execute the installation script
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/script.sh",
+      "/tmp/script.sh"
+    ]
+
+    connection {
+      type        = "ssh"
+      user        = "ubuntu"
+      private_key = file("~/.ssh/${var.ssh_key}")
+      host        = aws_instance.builder.public_ip
+      timeout     = "5m"
+      agent       = false
+    }
+  }
+}
 
 
